@@ -1,6 +1,5 @@
 import React from 'react';
 import {StyleSheet, View, ViewStyle} from 'react-native';
-import {colors} from '../../theme/colors';
 
 type ScreenContainerProps = {
   children: React.ReactNode;
@@ -14,8 +13,10 @@ const ScreenContainer = ({children, style}: ScreenContainerProps) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
-    padding: 24,
+    backgroundColor: '#f4f7fb',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 24,
   },
 });
 

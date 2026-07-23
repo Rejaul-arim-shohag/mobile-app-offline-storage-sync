@@ -20,12 +20,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    color: '#111827',
-    fontSize: 24,
-    fontWeight: '700',
+    color: '#0f172a',
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.4,
   },
   subtitle: {
-    color: '#6b7280',
+    color: '#64748b',
     fontSize: 13,
     marginTop: 4,
   },

@@ -1,17 +1,23 @@
 import React, {useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import CategoriesScreen from '../features/categories/screens/CategoriesScreen';
+import TaskDetailScreen from '../features/tasks/screens/TaskDetailScreen';
 import TaskListScreen from '../features/tasks/screens/TaskListScreen';
+import {Task} from '../features/tasks/types/task';
 
 const AppNavigator = () => {
   const [activeTab, setActiveTab] = useState<'tasks' | 'categories'>('tasks');
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   return (
     <View style={styles.container}>
       <View style={styles.tabBar}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'tasks' && styles.activeTab]}
-          onPress={() => setActiveTab('tasks')}>
+          onPress={() => {
+            setActiveTab('tasks');
+            setSelectedTask(null);
+          }}>
           <Text style={[styles.tabText, activeTab === 'tasks' && styles.activeTabText]}>Tasks</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -21,7 +27,13 @@ const AppNavigator = () => {
         </TouchableOpacity>
       </View>
 
-      {activeTab === 'tasks' ? <TaskListScreen /> : <CategoriesScreen />}
+      {activeTab === 'categories' ? (
+        <CategoriesScreen />
+      ) : selectedTask ? (
+        <TaskDetailScreen task={selectedTask} onBack={() => setSelectedTask(null)} />
+      ) : (
+        <TaskListScreen onSelectTask={setSelectedTask} />
+      )}
     </View>
   );
 };
@@ -32,9 +44,12 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e2e8f0',
+    borderBottomWidth: 1,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    gap: 8,
   },
   tab: {
     flex: 1,
