@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   StyleSheet,
@@ -9,17 +9,17 @@ import {
 } from 'react-native';
 import ScreenContainer from '../../../components/common/ScreenContainer';
 import ScreenHeader from '../../../shared/components/ScreenHeader';
-import {fetchCategories} from '../../categories/services/categoriesService';
-import {useTasks} from '../hooks/useTasks';
-import {Task} from '../types/task';
+import { fetchCategories } from '../../categories/services/categoriesService';
+import { useTasks } from '../hooks/useTasks';
+import { Task } from '../types/task';
 
 type TaskDetailScreenProps = {
   task: Task;
   onBack?: () => void;
 };
 
-const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
-  const {updateTask, toggleStar, deleteTask} = useTasks();
+const TaskDetailScreen = ({ task, onBack }: TaskDetailScreenProps) => {
+  const { updateTask, toggleStar, deleteTask } = useTasks();
 
   const [title, setTitle] = useState(task.title);
   const [completed, setCompleted] = useState(task.completed);
@@ -47,7 +47,7 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
     try {
       setIsSaving(true);
       setError(null);
-      await updateTask(task.id, {title: trimmedTitle, completed});
+      await updateTask(task.id, { title: trimmedTitle, completed });
       onBack?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update task');
@@ -91,7 +91,7 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
       'Delete Task',
       `Delete "${task.title}"? This cannot be undone.`,
       [
-        {text: 'Cancel', style: 'cancel'},
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
@@ -127,14 +127,20 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
         <View style={styles.cardHeader}>
           <Text style={styles.cardEyebrow}>Details</Text>
           <View style={styles.headerBadges}>
-            <TouchableOpacity onPress={handleToggleStar} style={styles.starBadge}>
-              <Text style={styles.starText}>{starred ? '★ Starred' : '☆ Unstarred'}</Text>
+            <TouchableOpacity
+              onPress={handleToggleStar}
+              style={styles.starBadge}
+            >
+              <Text style={styles.starText}>
+                {starred ? '★ Starred' : '☆ Unstarred'}
+              </Text>
             </TouchableOpacity>
             <View
               style={[
                 styles.statusBadge,
                 completed ? styles.statusBadgeDone : styles.statusBadgeOpen,
-              ]}>
+              ]}
+            >
               <Text style={styles.statusBadgeText}>
                 {completed ? 'Completed' : 'In progress'}
               </Text>
@@ -171,7 +177,8 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
             isBusy ? styles.disabledButton : null,
           ]}
           onPress={handleToggleComplete}
-          disabled={isBusy}>
+          disabled={isBusy}
+        >
           <Text style={styles.toggleButtonText}>
             {completed ? 'Reopen Task' : 'Mark as Complete'}
           </Text>
@@ -179,9 +186,13 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.primaryButton, isBusy ? styles.disabledButton : null]}
+            style={[
+              styles.primaryButton,
+              isBusy ? styles.disabledButton : null,
+            ]}
             onPress={handleSave}
-            disabled={isBusy}>
+            disabled={isBusy}
+          >
             <Text style={styles.primaryText}>
               {isSaving ? 'Saving...' : 'Save'}
             </Text>
@@ -189,7 +200,8 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
           <TouchableOpacity
             style={[styles.deleteButton, isBusy ? styles.disabledButton : null]}
             onPress={handleDelete}
-            disabled={isBusy}>
+            disabled={isBusy}
+          >
             <Text style={styles.deleteText}>
               {isDeleting ? 'Deleting...' : 'Delete'}
             </Text>
@@ -219,7 +231,7 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 16,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 2,
