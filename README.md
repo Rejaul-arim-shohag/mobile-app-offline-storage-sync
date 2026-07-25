@@ -25,8 +25,8 @@ A clean, production-grade offline-first React Native Task Manager built with Typ
    Create a `.env` file in the root directory (or use `.env.example`):
 
    ```env
-   SUPABASE_URL=https://your-supabase-instance.supabase.co
-   SUPABASE_ANON_KEY=your-supabase-anon-key
+   SUPABASE_URL= https://ucbfmqpjsvdssdzljpdv.supabase.co
+   SUPABASE_ANON_KEY= sb_publishable_bn6c_KFfblGF5wPMVZZkYg_HREnFXzl
    ```
 
 3. **Start Metro Bundler**:
