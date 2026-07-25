@@ -1,9 +1,16 @@
 import React, {useEffect, useState} from 'react';
-import {Alert, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import ScreenContainer from '../../../components/common/ScreenContainer';
 import ScreenHeader from '../../../shared/components/ScreenHeader';
 import {fetchCategories} from '../../categories/services/categoriesService';
-import {taskService} from '../services/taskService';
+import {useTasks} from '../hooks/useTasks';
 import {Task} from '../types/task';
 
 type TaskDetailScreenProps = {
@@ -12,8 +19,11 @@ type TaskDetailScreenProps = {
 };
 
 const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
+  const {updateTask, toggleStar, deleteTask} = useTasks();
+
   const [title, setTitle] = useState(task.title);
   const [completed, setCompleted] = useState(task.completed);
+  const [starred, setStarred] = useState(task.starred);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +47,7 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
     try {
       setIsSaving(true);
       setError(null);
-      await taskService.update(task.id, {title: trimmedTitle, completed});
+      await updateTask(task.id, {title: trimmedTitle, completed});
       onBack?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update task');
@@ -54,12 +64,25 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
     try {
       setIsSaving(true);
       setError(null);
-      await taskService.update(task.id, {title: title.trim() || task.title, completed: nextCompleted});
+      await updateTask(task.id, {
+        title: title.trim() || task.title,
+        completed: nextCompleted,
+      });
       setCompleted(nextCompleted);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update task');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleToggleStar = async () => {
+    try {
+      const nextStarred = !starred;
+      setStarred(nextStarred);
+      await toggleStar(task.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update star');
     }
   };
 
@@ -76,10 +99,12 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
             try {
               setIsDeleting(true);
               setError(null);
-              await taskService.remove(task.id);
+              await deleteTask(task.id);
               onBack?.();
             } catch (err) {
-              setError(err instanceof Error ? err.message : 'Unable to delete task');
+              setError(
+                err instanceof Error ? err.message : 'Unable to delete task',
+              );
               setIsDeleting(false);
             }
           },
@@ -101,8 +126,19 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardEyebrow}>Details</Text>
-          <View style={[styles.statusBadge, completed ? styles.statusBadgeDone : styles.statusBadgeOpen]}>
-            <Text style={styles.statusBadgeText}>{completed ? 'Completed' : 'In progress'}</Text>
+          <View style={styles.headerBadges}>
+            <TouchableOpacity onPress={handleToggleStar} style={styles.starBadge}>
+              <Text style={styles.starText}>{starred ? '★ Starred' : '☆ Unstarred'}</Text>
+            </TouchableOpacity>
+            <View
+              style={[
+                styles.statusBadge,
+                completed ? styles.statusBadgeDone : styles.statusBadgeOpen,
+              ]}>
+              <Text style={styles.statusBadgeText}>
+                {completed ? 'Completed' : 'In progress'}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -129,10 +165,16 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.toggleButton, completed ? styles.reopenButton : styles.completeButton, isBusy ? styles.disabledButton : null]}
+          style={[
+            styles.toggleButton,
+            completed ? styles.reopenButton : styles.completeButton,
+            isBusy ? styles.disabledButton : null,
+          ]}
           onPress={handleToggleComplete}
           disabled={isBusy}>
-          <Text style={styles.toggleButtonText}>{completed ? 'Reopen Task' : 'Mark as Complete'}</Text>
+          <Text style={styles.toggleButtonText}>
+            {completed ? 'Reopen Task' : 'Mark as Complete'}
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.actions}>
@@ -140,13 +182,17 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
             style={[styles.primaryButton, isBusy ? styles.disabledButton : null]}
             onPress={handleSave}
             disabled={isBusy}>
-            <Text style={styles.primaryText}>{isSaving ? 'Saving...' : 'Save'}</Text>
+            <Text style={styles.primaryText}>
+              {isSaving ? 'Saving...' : 'Save'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.deleteButton, isBusy ? styles.disabledButton : null]}
             onPress={handleDelete}
             disabled={isBusy}>
-            <Text style={styles.deleteText}>{isDeleting ? 'Deleting...' : 'Delete'}</Text>
+            <Text style={styles.deleteText}>
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -170,7 +216,7 @@ const styles = StyleSheet.create({
     borderColor: '#e5ebf5',
     borderRadius: 16,
     borderWidth: 1,
-    gap: 10,
+    gap: 12,
     padding: 16,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
@@ -181,6 +227,7 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 4,
   },
   cardEyebrow: {
@@ -189,9 +236,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
   },
-  cardBadge: {
-    color: '#2563eb',
-    fontSize: 12,
+  headerBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  starBadge: {
+    backgroundColor: '#fffbe6',
+    borderColor: '#ffe58f',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  starText: {
+    color: '#d48806',
+    fontSize: 11,
     fontWeight: '700',
   },
   label: {

@@ -9,6 +9,7 @@ export interface Task {
   updatedAt?: string;
   completed: boolean;
   starred: boolean;
+  isLocalOnly?: boolean;
 }
 
 export interface TaskFilters {

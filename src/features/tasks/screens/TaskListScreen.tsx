@@ -1,10 +1,12 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -17,9 +19,10 @@ import {
   Category,
   fetchCategories,
 } from '../../categories/services/categoriesService';
-import {useTaskFilters} from '../hooks/useTaskFilters';
-import {taskService} from '../services/taskService';
-import {Task, TaskFilters} from '../types/task';
+import { useDebounce } from '../hooks/useDebounce';
+import { useTaskFilters } from '../hooks/useTaskFilters';
+import { useTasks } from '../hooks/useTasks';
+import { Task, TaskFilters } from '../types/task';
 
 type TaskListScreenProps = {
   onSelectTask?: (task: Task) => void;
@@ -57,11 +60,51 @@ const parseYmdDate = (value: string): Date | null => {
   return parsed;
 };
 
-const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [search, setSearch] = useState('');
+const formatRelativeTime = (isoString: string | null): string => {
+  if (!isoString) {
+    return 'Never';
+  }
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return 'Never';
+  }
+  const now = new Date();
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffSec < 10) {
+    return 'Just now';
+  }
+  if (diffSec < 60) {
+    return `${diffSec}s ago`;
+  }
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) {
+    return `${diffMin}m ago`;
+  }
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const TaskListScreen = ({ onSelectTask }: TaskListScreenProps) => {
+  const {
+    tasks,
+    isRefreshing,
+    isOffline,
+    lastRefreshedAt,
+    error: syncError,
+    refreshTasks,
+    createTask: submitCreateTask,
+    toggleStar,
+  } = useTasks();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
   const [status, setStatus] = useState<'open' | 'done' | undefined>('open');
   const [sortBy, setSortBy] = useState<'dueDate' | 'createdAt'>('createdAt');
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(
+    undefined,
+  );
+
   const [isCreateSheetVisible, setIsCreateSheetVisible] = useState(false);
   const [title, setTitle] = useState('');
   const [categoryId, setCategoryId] = useState('general');
@@ -74,15 +117,20 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const sheetTranslateY = useRef(new Animated.Value(SHEET_HIDDEN_OFFSET)).current;
 
+  const sheetTranslateY = useRef(
+    new Animated.Value(SHEET_HIDDEN_OFFSET),
+  ).current;
+
+  // Filter state processed via selector outside render tree
   const filters = useMemo<TaskFilters>(
     () => ({
-      search,
+      search: debouncedSearch,
       status,
       sortBy,
+      categoryId: selectedCategory,
     }),
-    [search, sortBy, status],
+    [debouncedSearch, sortBy, status, selectedCategory],
   );
 
   const visibleTasks = useTaskFilters(tasks, filters);
@@ -111,19 +159,6 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
   }, [calendarMonth]);
 
   useEffect(() => {
-    const loadTasks = async () => {
-      try {
-        const nextTasks = await taskService.list();
-        setTasks(nextTasks);
-      } catch {
-        // Keep current list when task fetch fails.
-      }
-    };
-
-    loadTasks();
-  }, []);
-
-  useEffect(() => {
     const loadCategories = async () => {
       try {
         setCategoriesError(null);
@@ -135,7 +170,9 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
           setCategoryName(nextCategories[0].name);
         }
       } catch (err) {
-        setCategoriesError(err instanceof Error ? err.message : 'Unable to load categories');
+        setCategoriesError(
+          err instanceof Error ? err.message : 'Unable to load categories',
+        );
       }
     };
 
@@ -159,7 +196,7 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
       toValue: SHEET_HIDDEN_OFFSET,
       duration: 180,
       useNativeDriver: true,
-    }).start(({finished}) => {
+    }).start(({ finished }) => {
       if (finished) {
         setIsCreateSheetVisible(false);
         setTitle('');
@@ -182,16 +219,22 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
   };
 
   const changeCalendarMonth = (direction: -1 | 1) => {
-    setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1));
+    setCalendarMonth(
+      prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1),
+    );
   };
 
   const selectDueDate = (day: number) => {
-    const selected = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
+    const selected = new Date(
+      calendarMonth.getFullYear(),
+      calendarMonth.getMonth(),
+      day,
+    );
     setDueDate(formatDateToYmd(selected));
     setIsCalendarOpen(false);
   };
 
-  const createTask = async () => {
+  const handleCreateTask = async () => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle || isCreating) {
       return;
@@ -201,19 +244,20 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
       setIsCreating(true);
       setCreateError(null);
 
-      const createdTask = await taskService.create({
+      await submitCreateTask({
         title: trimmedTitle,
-        categoryId: categoryId.trim() || (categories[0]?.id.toString() ?? 'general'),
+        categoryId:
+          categoryId.trim() || (categories[0]?.id.toString() ?? 'general'),
         dueDate: dueDate.trim() || undefined,
         completed: false,
         starred: false,
       });
 
-      setTasks(prev => [createdTask, ...prev]);
       closeCreateSheet();
     } catch (err) {
-      console.log('taskService', err);
-      setCreateError(err instanceof Error ? err.message : 'Unable to create task');
+      setCreateError(
+        err instanceof Error ? err.message : 'Unable to create task',
+      );
     } finally {
       setIsCreating(false);
     }
@@ -221,18 +265,59 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
 
   return (
     <ScreenContainer style={styles.screen}>
-      <ScreenHeader title="Tasks" subtitle="Filter, sort, and review work locally" />
+      <ScreenHeader
+        title="Tasks"
+        subtitle="Offline-first task management & caching"
+      />
+
+      {/* Sync status banner surfacing last refreshed time, offline state & background refresh indicator */}
+      <View style={styles.syncBanner}>
+        <View style={styles.syncLeft}>
+          {isOffline ? (
+            <View style={styles.offlineBadge}>
+              <View style={styles.offlineDot} />
+              <Text style={styles.offlineText}>Offline (Cached Data)</Text>
+            </View>
+          ) : (
+            <View style={styles.onlineBadge}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.onlineText}>
+                Refreshed: {formatRelativeTime(lastRefreshedAt)}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {isRefreshing ? (
+          <View style={styles.refreshingWrap}>
+            <ActivityIndicator size="small" color="#2563eb" />
+            <Text style={styles.refreshingText}>Refreshing...</Text>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.refreshButton} onPress={refreshTasks}>
+            <Text style={styles.refreshButtonText}>Sync</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {syncError && isOffline ? (
+        <View style={styles.errorNotice}>
+          <Text style={styles.errorNoticeText}>
+            Unable to connect to server. Showing local cached tasks.
+          </Text>
+        </View>
+      ) : null}
 
       <TouchableOpacity style={styles.createButton} onPress={openCreateSheet}>
-        <Text style={styles.createButtonText}>Create Task</Text>
+        <Text style={styles.createButtonText}>+ Create Task</Text>
       </TouchableOpacity>
 
       <View style={styles.searchWrap}>
         <TextInput
           style={styles.input}
-          placeholder="Search tasks"
-          value={search}
-          onChangeText={setSearch}
+          placeholder="Search tasks by title"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
           placeholderTextColor="#94a3b8"
         />
       </View>
@@ -240,45 +325,143 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
       <View style={styles.controls}>
         <TouchableOpacity
           style={[styles.pill, status === 'open' && styles.pillActive]}
-          onPress={() => setStatus(status === 'open' ? undefined : 'open')}>
-          <Text style={[styles.pillText, status === 'open' && styles.pillTextActive]}>Open</Text>
+          onPress={() => setStatus(status === 'open' ? undefined : 'open')}
+        >
+          <Text
+            style={[
+              styles.pillText,
+              status === 'open' && styles.pillTextActive,
+            ]}
+          >
+            Open
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.pill, status === 'done' && styles.pillActive]}
-          onPress={() => setStatus(status === 'done' ? undefined : 'done')}>
-          <Text style={[styles.pillText, status === 'done' && styles.pillTextActive]}>Done</Text>
+          onPress={() => setStatus(status === 'done' ? undefined : 'done')}
+        >
+          <Text
+            style={[
+              styles.pillText,
+              status === 'done' && styles.pillTextActive,
+            ]}
+          >
+            Done
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.pill, sortBy === 'dueDate' && styles.pillActive]}
-          onPress={() => setSortBy(sortBy === 'dueDate' ? 'createdAt' : 'dueDate')}>
-          <Text style={[styles.pillText, sortBy === 'dueDate' && styles.pillTextActive]}>Sort by due date</Text>
+          onPress={() =>
+            setSortBy(sortBy === 'dueDate' ? 'createdAt' : 'dueDate')
+          }
+        >
+          <Text
+            style={[
+              styles.pillText,
+              sortBy === 'dueDate' && styles.pillTextActive,
+            ]}
+          >
+            Sort: {sortBy === 'dueDate' ? 'Due Date' : 'Created Time'}
+          </Text>
         </TouchableOpacity>
       </View>
+
+      {categories.length > 0 ? (
+        <View style={styles.categoryFilterRow}>
+          <TouchableOpacity
+            style={[
+              styles.categoryChip,
+              selectedCategory === undefined && styles.categoryChipActive,
+            ]}
+            onPress={() => setSelectedCategory(undefined)}
+          >
+            <Text
+              style={[
+                styles.categoryChipText,
+                selectedCategory === undefined && styles.categoryChipTextActive,
+              ]}
+            >
+              All Categories
+            </Text>
+          </TouchableOpacity>
+          {categories.map(cat => {
+            const catIdStr = cat.id.toString();
+            const isSelected = selectedCategory === catIdStr;
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[
+                  styles.categoryChip,
+                  isSelected && styles.categoryChipActive,
+                ]}
+                onPress={() =>
+                  setSelectedCategory(isSelected ? undefined : catIdStr)
+                }
+              >
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    isSelected && styles.categoryChipTextActive,
+                  ]}
+                >
+                  {cat.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
 
       <FlatList
         data={visibleTasks}
         keyExtractor={item => item.id}
-        renderItem={({item}) => (
-          <TouchableOpacity onPress={() => onSelectTask?.(item)}>
-            <TaskRow task={item} />
-          </TouchableOpacity>
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refreshTasks}
+            tintColor="#2563eb"
+          />
+        }
+        renderItem={({ item }) => (
+          <TaskRow
+            task={item}
+            onSelect={() => onSelectTask?.(item)}
+            onToggleStar={() => toggleStar(item.id)}
+          />
         )}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No tasks found</Text>
+            <Text style={styles.emptySubtitle}>
+              {searchQuery
+                ? 'Try matching a different task title.'
+                : 'Create a new task to get started.'}
+            </Text>
+          </View>
+        }
         contentContainerStyle={styles.listContent}
       />
 
       {isCreateSheetVisible ? (
         <View style={styles.sheetRoot} pointerEvents="box-none">
           <Pressable style={styles.sheetBackdrop} onPress={closeCreateSheet} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <Animated.View style={[styles.sheet, {transform: [{translateY: sheetTranslateY}]}]}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <Animated.View
+              style={[
+                styles.sheet,
+                { transform: [{ translateY: sheetTranslateY }] },
+              ]}
+            >
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>Create Task</Text>
 
               <TextInput
                 style={styles.sheetInput}
-                placeholder="Title"
+                placeholder="Task title"
                 value={title}
                 onChangeText={setTitle}
                 placeholderTextColor="#94a3b8"
@@ -288,29 +471,44 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                 <Text style={styles.dropdownLabel}>Category</Text>
                 <TouchableOpacity
                   style={styles.dropdownTrigger}
-                  onPress={() => setIsCategoryDropdownOpen(prev => !prev)}>
+                  onPress={() => setIsCategoryDropdownOpen(prev => !prev)}
+                >
                   <Text style={styles.dropdownText}>{categoryName}</Text>
-                  <Text style={styles.dropdownChevron}>{isCategoryDropdownOpen ? '▲' : '▼'}</Text>
+                  <Text style={styles.dropdownChevron}>
+                    {isCategoryDropdownOpen ? '▲' : '▼'}
+                  </Text>
                 </TouchableOpacity>
 
                 {isCategoryDropdownOpen ? (
                   <View style={styles.dropdownMenu}>
                     {categories.length === 0 ? (
-                      <Text style={styles.dropdownEmptyText}>No categories available</Text>
+                      <Text style={styles.dropdownEmptyText}>
+                        No categories available
+                      </Text>
                     ) : (
                       categories.map(item => {
                         const selected = categoryId === item.id.toString();
                         return (
                           <TouchableOpacity
                             key={item.id}
-                            style={[styles.dropdownItem, selected ? styles.dropdownItemSelected : null]}
+                            style={[
+                              styles.dropdownItem,
+                              selected ? styles.dropdownItemSelected : null,
+                            ]}
                             onPress={() => {
                               setCategoryId(item.id.toString());
                               setCategoryName(item.name);
                               setIsCategoryDropdownOpen(false);
-                            }}>
+                            }}
+                          >
                             <Text
-                              style={[styles.dropdownItemText, selected ? styles.dropdownItemTextSelected : null]}>
+                              style={[
+                                styles.dropdownItemText,
+                                selected
+                                  ? styles.dropdownItemTextSelected
+                                  : null,
+                              ]}
+                            >
                               {item.name}
                             </Text>
                           </TouchableOpacity>
@@ -323,13 +521,21 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
 
               <View>
                 <Text style={styles.dropdownLabel}>Due Date</Text>
-                <TouchableOpacity style={styles.dropdownTrigger} onPress={openCalendar}>
-                  <Text style={styles.dropdownText}>{dueDate || 'Select due date'}</Text>
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={openCalendar}
+                >
+                  <Text style={styles.dropdownText}>
+                    {dueDate || 'Select due date'}
+                  </Text>
                   <Text style={styles.dropdownChevron}>▼</Text>
                 </TouchableOpacity>
 
                 {dueDate ? (
-                  <TouchableOpacity onPress={() => setDueDate('')} style={styles.clearDateButton}>
+                  <TouchableOpacity
+                    onPress={() => setDueDate('')}
+                    style={styles.clearDateButton}
+                  >
                     <Text style={styles.clearDateText}>Clear due date</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -337,7 +543,10 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                 {isCalendarOpen ? (
                   <View style={styles.calendarWrap}>
                     <View style={styles.calendarHeader}>
-                      <TouchableOpacity onPress={() => changeCalendarMonth(-1)} style={styles.calendarNavButton}>
+                      <TouchableOpacity
+                        onPress={() => changeCalendarMonth(-1)}
+                        style={styles.calendarNavButton}
+                      >
                         <Text style={styles.calendarNavText}>{'<'}</Text>
                       </TouchableOpacity>
                       <Text style={styles.calendarMonthText}>
@@ -346,7 +555,10 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                           year: 'numeric',
                         })}
                       </Text>
-                      <TouchableOpacity onPress={() => changeCalendarMonth(1)} style={styles.calendarNavButton}>
+                      <TouchableOpacity
+                        onPress={() => changeCalendarMonth(1)}
+                        style={styles.calendarNavButton}
+                      >
                         <Text style={styles.calendarNavText}>{'>'}</Text>
                       </TouchableOpacity>
                     </View>
@@ -360,7 +572,12 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
 
                       {calendarDays.map((day, index) => {
                         if (!day) {
-                          return <View key={`empty-${index}`} style={styles.calendarDayCell} />;
+                          return (
+                            <View
+                              key={`empty-${index}`}
+                              style={styles.calendarDayCell}
+                            />
+                          );
                         }
 
                         const currentDate = new Date(
@@ -374,13 +591,22 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                         return (
                           <TouchableOpacity
                             key={currentDateYmd}
-                            style={[styles.calendarDayCell, isSelected ? styles.calendarDayCellSelected : null]}
-                            onPress={() => selectDueDate(day)}>
+                            style={[
+                              styles.calendarDayCell,
+                              isSelected
+                                ? styles.calendarDayCellSelected
+                                : null,
+                            ]}
+                            onPress={() => selectDueDate(day)}
+                          >
                             <Text
                               style={[
                                 styles.calendarDayText,
-                                isSelected ? styles.calendarDayTextSelected : null,
-                              ]}>
+                                isSelected
+                                  ? styles.calendarDayTextSelected
+                                  : null,
+                              ]}
+                            >
                               {day}
                             </Text>
                           </TouchableOpacity>
@@ -391,19 +617,33 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                 ) : null}
               </View>
 
-              {categoriesError ? <Text style={styles.errorText}>{categoriesError}</Text> : null}
+              {categoriesError ? (
+                <Text style={styles.errorText}>{categoriesError}</Text>
+              ) : null}
 
-              {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+              {createError ? (
+                <Text style={styles.errorText}>{createError}</Text>
+              ) : null}
 
               <View style={styles.sheetActions}>
-                <TouchableOpacity style={[styles.sheetActionButton, styles.cancelButton]} onPress={closeCreateSheet}>
+                <TouchableOpacity
+                  style={[styles.sheetActionButton, styles.cancelButton]}
+                  onPress={closeCreateSheet}
+                >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.sheetActionButton, styles.confirmButton, isCreating ? styles.disabledButton : null]}
-                  onPress={createTask}
-                  disabled={isCreating}>
-                  <Text style={styles.confirmButtonText}>{isCreating ? 'Creating...' : 'Create'}</Text>
+                  style={[
+                    styles.sheetActionButton,
+                    styles.confirmButton,
+                    isCreating ? styles.disabledButton : null,
+                  ]}
+                  onPress={handleCreateTask}
+                  disabled={isCreating}
+                >
+                  <Text style={styles.confirmButtonText}>
+                    {isCreating ? 'Creating...' : 'Create'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
@@ -414,34 +654,157 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
   );
 };
 
-const TaskRow = ({task}: {task: Task}) => {
-  return (
-    <View style={styles.taskCard}>
-      <View style={styles.taskMeta}>
-        <Text style={styles.taskTitle}>{task.title}</Text>
-        {task.starred ? <Text style={styles.star}>★</Text> : null}
-      </View>
-      <View style={styles.taskFooter}>
-        <Text style={styles.taskStatus}>{task.completed ? 'Done' : 'Open'}</Text>
-        <Text style={styles.taskDue}>Due {task.dueDate ?? 'soon'}</Text>
-      </View>
-    </View>
-  );
-};
+const TaskRow = React.memo(
+  ({
+    task,
+    onSelect,
+    onToggleStar,
+  }: {
+    task: Task;
+    onSelect: () => void;
+    onToggleStar: () => void;
+  }) => {
+    return (
+      <TouchableOpacity onPress={onSelect} activeOpacity={0.7}>
+        <View style={styles.taskCard}>
+          <View style={styles.taskMeta}>
+            <Text style={styles.taskTitle}>{task.title}</Text>
+            <TouchableOpacity
+              onPress={onToggleStar}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.star}>{task.starred ? '★' : '☆'}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.taskFooter}>
+            <View style={styles.footerLeft}>
+              <View
+                style={[
+                  styles.statusTag,
+                  task.completed ? styles.statusTagDone : styles.statusTagOpen,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusTagText,
+                    task.completed
+                      ? styles.statusTagTextDone
+                      : styles.statusTagTextOpen,
+                  ]}
+                >
+                  {task.completed ? 'Done' : 'Open'}
+                </Text>
+              </View>
+              {task.isLocalOnly || task.id.startsWith('local_') ? (
+                <View style={styles.pendingTag}>
+                  <Text style={styles.pendingTagText}>Pending Sync</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.taskDue}>
+              {task.dueDate ? `Due ${task.dueDate}` : 'No due date'}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  },
+);
 
 const styles = StyleSheet.create({
   screen: {
-    paddingTop: 16,
+    paddingTop: 12,
+  },
+  syncBanner: {
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  syncLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  offlineBadge: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  offlineDot: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 999,
+    height: 8,
+    width: 8,
+  },
+  offlineText: {
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  onlineBadge: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  onlineDot: {
+    backgroundColor: '#10b981',
+    borderRadius: 999,
+    height: 8,
+    width: 8,
+  },
+  onlineText: {
+    color: '#475569',
+    fontSize: 12,
+  },
+  refreshingWrap: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  refreshingText: {
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  refreshButton: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  refreshButtonText: {
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  errorNotice: {
+    backgroundColor: '#fffbe6',
+    borderColor: '#ffe58f',
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 10,
+  },
+  errorNoticeText: {
+    color: '#d48806',
+    fontSize: 12,
   },
   createButton: {
     alignItems: 'center',
     backgroundColor: '#2563eb',
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   createButtonText: {
     color: '#fff',
+    fontSize: 14,
     fontWeight: '700',
   },
   searchWrap: {
@@ -452,11 +815,12 @@ const styles = StyleSheet.create({
     borderColor: '#dfe7f1',
     borderRadius: 14,
     borderWidth: 1,
+    fontSize: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 1},
-    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
     shadowRadius: 4,
     elevation: 1,
   },
@@ -464,7 +828,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   pill: {
     backgroundColor: '#e8eef8',
@@ -483,8 +847,32 @@ const styles = StyleSheet.create({
   pillTextActive: {
     color: '#fff',
   },
+  categoryFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  categoryChip: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  categoryChipActive: {
+    backgroundColor: '#1e293b',
+  },
+  categoryChipText: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  categoryChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   listContent: {
-    gap: 8,
+    gap: 10,
     paddingBottom: 24,
   },
   taskCard: {
@@ -494,8 +882,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
     shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 2,
   },
@@ -506,8 +894,10 @@ const styles = StyleSheet.create({
   },
   taskTitle: {
     color: '#0f172a',
+    flex: 1,
     fontSize: 15,
     fontWeight: '700',
+    marginRight: 8,
   },
   taskFooter: {
     alignItems: 'center',
@@ -515,10 +905,44 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 10,
   },
-  taskStatus: {
-    color: '#2563eb',
-    fontSize: 12,
+  footerLeft: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  pendingTag: {
+    backgroundColor: '#fffbe6',
+    borderColor: '#ffe58f',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pendingTagText: {
+    color: '#d48806',
+    fontSize: 10,
     fontWeight: '700',
+  },
+  statusTag: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  statusTagOpen: {
+    backgroundColor: '#dbeafe',
+  },
+  statusTagDone: {
+    backgroundColor: '#dcfce7',
+  },
+  statusTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusTagTextOpen: {
+    color: '#1d4ed8',
+  },
+  statusTagTextDone: {
+    color: '#15803d',
   },
   taskDue: {
     color: '#94a3b8',
@@ -526,7 +950,21 @@ const styles = StyleSheet.create({
   },
   star: {
     color: '#f59e0b',
+    fontSize: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyTitle: {
+    color: '#475569',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  emptySubtitle: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginTop: 4,
   },
   sheetRoot: {
     ...StyleSheet.absoluteFill,
