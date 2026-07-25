@@ -72,7 +72,6 @@ create table public.tasks (
 create table public.categories (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  color text null,
   created_at timestamptz not null default now()
 );
 ```
