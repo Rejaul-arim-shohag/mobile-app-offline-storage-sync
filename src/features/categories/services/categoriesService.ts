@@ -17,3 +17,22 @@ export const fetchCategories = async (): Promise<Category[]> => {
 
   return (data ?? []) as Category[];
 };
+
+export const createCategory = async (name: string): Promise<Category> => {
+  const createdAt = new Date().toISOString();
+
+  const {data, error} = await supabase
+    .from('categories')
+    .insert({
+      name,
+      created_at: createdAt,
+    })
+    .select('id, name')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as Category;
+};
