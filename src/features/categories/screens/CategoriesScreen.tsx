@@ -1,20 +1,40 @@
-import React, {useState} from 'react';
-import {StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import ScreenContainer from '../../../components/common/ScreenContainer';
 import ScreenHeader from '../../../shared/components/ScreenHeader';
+import {fetchCategories} from '../services/categoriesService';
 
-const initialCategories = ['Work', 'Personal', 'Health'];
+const ListSeparator = () => <View style={styles.separator} />;
 
 const CategoriesScreen = () => {
-  const [categories, setCategories] = useState(initialCategories);
+  const [categories, setCategories] = useState<{id: number; name: string}[]>([]);
   const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const nextCategories = await fetchCategories();
+        setCategories(nextCategories);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to load categories');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCategories();
+  }, []);
 
   const addCategory = () => {
     if (!name.trim()) {
       return;
     }
 
-    setCategories(prev => [...prev, name.trim()]);
+    setCategories(prev => [...prev, {id: Date.now(), name: name.trim()}]);
     setName('');
   };
 
@@ -36,11 +56,26 @@ const CategoriesScreen = () => {
       </View>
 
       <View style={styles.card}>
-        {categories.map(category => (
-          <View key={category} style={styles.categoryItem}>
-            <Text style={styles.text}>{category}</Text>
-          </View>
-        ))}
+        {loading ? (
+          <ActivityIndicator size="small" color="#2563eb" />
+        ) : error ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : categories.length === 0 ? (
+          <Text style={styles.emptyText}>No categories yet.</Text>
+        ) : (
+          <FlatList
+            data={categories}
+            keyExtractor={item => item.id.toString()}
+            renderItem={({item}) => (
+              <View style={styles.categoryItem}>
+                <Text style={styles.text}>{item.name}</Text>
+              </View>
+            )}
+            ItemSeparatorComponent={ListSeparator}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
       </View>
     </ScreenContainer>
   );
@@ -79,13 +114,18 @@ const styles = StyleSheet.create({
     borderColor: '#e5ebf5',
     borderRadius: 16,
     borderWidth: 1,
-    gap: 10,
     padding: 16,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 1,
+  },
+  listContent: {
+    paddingVertical: 2,
+  },
+  separator: {
+    height: 10,
   },
   categoryItem: {
     borderBottomColor: '#f3f4f6',
@@ -95,6 +135,14 @@ const styles = StyleSheet.create({
   text: {
     color: '#111827',
     fontSize: 15,
+  },
+  emptyText: {
+    color: '#64748b',
+    fontSize: 14,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 14,
   },
 });
 
