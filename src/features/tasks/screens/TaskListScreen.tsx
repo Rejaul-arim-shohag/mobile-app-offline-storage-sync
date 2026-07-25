@@ -21,49 +21,57 @@ import {useTaskFilters} from '../hooks/useTaskFilters';
 import {taskService} from '../services/taskService';
 import {Task, TaskFilters} from '../types/task';
 
-const sampleTasks: Task[] = [
-  {
-    id: '1',
-    title: 'Review sprint goals',
-    description: 'Check the list of priorities for the week.',
-    categoryId: 'work',
-    dueDate: '2026-07-24',
-    createdAt: '2026-07-20T08:30:00.000Z',
-    completed: false,
-    starred: true,
-  },
-  {
-    id: '2',
-    title: 'Plan weekend trip',
-    description: 'Map out tickets and lodging.',
-    categoryId: 'personal',
-    dueDate: '2026-07-25',
-    createdAt: '2026-07-21T10:00:00.000Z',
-    completed: true,
-    starred: false,
-  },
-];
-
 type TaskListScreenProps = {
   onSelectTask?: (task: Task) => void;
 };
 
 const SHEET_HIDDEN_OFFSET = 380;
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const formatDateToYmd = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseYmdDate = (value: string): Date | null => {
+  if (!value) {
+    return null;
+  }
+
+  const [yearText, monthText, dayText] = value.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+};
 
 const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
-  const [tasks, setTasks] = useState<Task[]>(sampleTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'open' | 'done' | undefined>('open');
   const [sortBy, setSortBy] = useState<'dueDate' | 'createdAt'>('createdAt');
   const [isCreateSheetVisible, setIsCreateSheetVisible] = useState(false);
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('general');
   const [categoryName, setCategoryName] = useState('General');
   const [categories, setCategories] = useState<Category[]>([]);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState('');
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const sheetTranslateY = useRef(new Animated.Value(SHEET_HIDDEN_OFFSET)).current;
@@ -78,6 +86,42 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
   );
 
   const visibleTasks = useTaskFilters(tasks, filters);
+  const selectedDueDate = useMemo(() => parseYmdDate(dueDate), [dueDate]);
+
+  const calendarDays = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const firstWeekday = new Date(year, month, 1).getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const cells: Array<number | null> = [];
+
+    for (let i = 0; i < firstWeekday; i += 1) {
+      cells.push(null);
+    }
+
+    for (let day = 1; day <= totalDays; day += 1) {
+      cells.push(day);
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    return cells;
+  }, [calendarMonth]);
+
+  useEffect(() => {
+    const loadTasks = async () => {
+      try {
+        const nextTasks = await taskService.list();
+        setTasks(nextTasks);
+      } catch {
+        // Keep current list when task fetch fails.
+      }
+    };
+
+    loadTasks();
+  }, []);
 
   useEffect(() => {
     const loadCategories = async () => {
@@ -119,16 +163,32 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
       if (finished) {
         setIsCreateSheetVisible(false);
         setTitle('');
-        setDescription('');
         if (categories.length > 0) {
           setCategoryId(categories[0].id.toString());
           setCategoryName(categories[0].name);
         }
         setIsCategoryDropdownOpen(false);
+        setIsCalendarOpen(false);
         setDueDate('');
         setCreateError(null);
       }
     });
+  };
+
+  const openCalendar = () => {
+    const baseDate = selectedDueDate ?? new Date();
+    setCalendarMonth(new Date(baseDate.getFullYear(), baseDate.getMonth(), 1));
+    setIsCalendarOpen(true);
+  };
+
+  const changeCalendarMonth = (direction: -1 | 1) => {
+    setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1));
+  };
+
+  const selectDueDate = (day: number) => {
+    const selected = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
+    setDueDate(formatDateToYmd(selected));
+    setIsCalendarOpen(false);
   };
 
   const createTask = async () => {
@@ -143,7 +203,6 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
 
       const createdTask = await taskService.create({
         title: trimmedTitle,
-        description: description.trim(),
         categoryId: categoryId.trim() || (categories[0]?.id.toString() ?? 'general'),
         dueDate: dueDate.trim() || undefined,
         completed: false,
@@ -153,6 +212,7 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
       setTasks(prev => [createdTask, ...prev]);
       closeCreateSheet();
     } catch (err) {
+      console.log('taskService', err);
       setCreateError(err instanceof Error ? err.message : 'Unable to create task');
     } finally {
       setIsCreating(false);
@@ -223,13 +283,6 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                 onChangeText={setTitle}
                 placeholderTextColor="#94a3b8"
               />
-              <TextInput
-                style={styles.sheetInput}
-                placeholder="Description"
-                value={description}
-                onChangeText={setDescription}
-                placeholderTextColor="#94a3b8"
-              />
 
               <View>
                 <Text style={styles.dropdownLabel}>Category</Text>
@@ -268,13 +321,75 @@ const TaskListScreen = ({onSelectTask}: TaskListScreenProps) => {
                 ) : null}
               </View>
 
-              <TextInput
-                style={styles.sheetInput}
-                placeholder="Due Date (YYYY-MM-DD)"
-                value={dueDate}
-                onChangeText={setDueDate}
-                placeholderTextColor="#94a3b8"
-              />
+              <View>
+                <Text style={styles.dropdownLabel}>Due Date</Text>
+                <TouchableOpacity style={styles.dropdownTrigger} onPress={openCalendar}>
+                  <Text style={styles.dropdownText}>{dueDate || 'Select due date'}</Text>
+                  <Text style={styles.dropdownChevron}>▼</Text>
+                </TouchableOpacity>
+
+                {dueDate ? (
+                  <TouchableOpacity onPress={() => setDueDate('')} style={styles.clearDateButton}>
+                    <Text style={styles.clearDateText}>Clear due date</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {isCalendarOpen ? (
+                  <View style={styles.calendarWrap}>
+                    <View style={styles.calendarHeader}>
+                      <TouchableOpacity onPress={() => changeCalendarMonth(-1)} style={styles.calendarNavButton}>
+                        <Text style={styles.calendarNavText}>{'<'}</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.calendarMonthText}>
+                        {calendarMonth.toLocaleDateString(undefined, {
+                          month: 'long',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                      <TouchableOpacity onPress={() => changeCalendarMonth(1)} style={styles.calendarNavButton}>
+                        <Text style={styles.calendarNavText}>{'>'}</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.calendarGrid}>
+                      {WEEKDAY_LABELS.map(label => (
+                        <Text key={label} style={styles.calendarWeekdayText}>
+                          {label}
+                        </Text>
+                      ))}
+
+                      {calendarDays.map((day, index) => {
+                        if (!day) {
+                          return <View key={`empty-${index}`} style={styles.calendarDayCell} />;
+                        }
+
+                        const currentDate = new Date(
+                          calendarMonth.getFullYear(),
+                          calendarMonth.getMonth(),
+                          day,
+                        );
+                        const currentDateYmd = formatDateToYmd(currentDate);
+                        const isSelected = dueDate === currentDateYmd;
+
+                        return (
+                          <TouchableOpacity
+                            key={currentDateYmd}
+                            style={[styles.calendarDayCell, isSelected ? styles.calendarDayCellSelected : null]}
+                            onPress={() => selectDueDate(day)}>
+                            <Text
+                              style={[
+                                styles.calendarDayText,
+                                isSelected ? styles.calendarDayTextSelected : null,
+                              ]}>
+                              {day}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+              </View>
 
               {categoriesError ? <Text style={styles.errorText}>{categoriesError}</Text> : null}
 
@@ -306,7 +421,6 @@ const TaskRow = ({task}: {task: Task}) => {
         <Text style={styles.taskTitle}>{task.title}</Text>
         {task.starred ? <Text style={styles.star}>★</Text> : null}
       </View>
-      <Text style={styles.taskDescription}>{task.description}</Text>
       <View style={styles.taskFooter}>
         <Text style={styles.taskStatus}>{task.completed ? 'Done' : 'Open'}</Text>
         <Text style={styles.taskDue}>Due {task.dueDate ?? 'soon'}</Text>
@@ -394,12 +508,6 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontSize: 15,
     fontWeight: '700',
-  },
-  taskDescription: {
-    color: '#64748b',
-    fontSize: 13,
-    marginTop: 4,
-    lineHeight: 19,
   },
   taskFooter: {
     alignItems: 'center',
@@ -513,6 +621,74 @@ const styles = StyleSheet.create({
     fontSize: 13,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  clearDateButton: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+  },
+  clearDateText: {
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  calendarWrap: {
+    backgroundColor: '#fff',
+    borderColor: '#dfe7f1',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 8,
+    padding: 10,
+  },
+  calendarHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  calendarNavButton: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  calendarNavText: {
+    color: '#334155',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  calendarMonthText: {
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 6,
+  },
+  calendarWeekdayText: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    width: '14.28%',
+  },
+  calendarDayCell: {
+    alignItems: 'center',
+    borderRadius: 8,
+    justifyContent: 'center',
+    minHeight: 30,
+    width: '14.28%',
+  },
+  calendarDayCellSelected: {
+    backgroundColor: '#2563eb',
+  },
+  calendarDayText: {
+    color: '#334155',
+    fontSize: 13,
+  },
+  calendarDayTextSelected: {
+    color: '#fff',
+    fontWeight: '700',
   },
   sheetActions: {
     flexDirection: 'row',

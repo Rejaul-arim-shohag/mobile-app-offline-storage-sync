@@ -3,10 +3,10 @@ export type TaskStatus = 'open' | 'done';
 export interface Task {
   id: string;
   title: string;
-  description: string;
   categoryId: string;
   dueDate?: string;
   createdAt: string;
+  updatedAt?: string;
   completed: boolean;
   starred: boolean;
 }

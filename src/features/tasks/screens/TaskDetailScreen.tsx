@@ -10,7 +10,6 @@ type TaskDetailScreenProps = {
 };
 
 const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
-  const [isStarred, setIsStarred] = useState(task.starred);
   const [completed, setCompleted] = useState(task.completed);
 
   return (
@@ -30,17 +29,9 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
         <Text style={styles.label}>Title</Text>
         <TextInput style={styles.input} value={task.title} />
 
-        <Text style={styles.label}>Description</Text>
-        <TextInput style={styles.input} value={task.description} multiline />
-
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Completed</Text>
           <Switch value={completed} onValueChange={setCompleted} />
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.rowLabel}>Starred locally</Text>
-          <Switch value={isStarred} onValueChange={setIsStarred} />
         </View>
 
         <View style={styles.actions}>

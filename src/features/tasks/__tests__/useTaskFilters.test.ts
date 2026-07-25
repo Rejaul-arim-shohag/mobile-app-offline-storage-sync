@@ -6,7 +6,6 @@ describe('useTaskFilters', () => {
     {
       id: '1',
       title: 'Ship feature',
-      description: 'Deploy the task manager MVP',
       categoryId: 'work',
       dueDate: '2026-07-24',
       createdAt: '2026-07-20T08:30:00.000Z',
@@ -16,7 +15,6 @@ describe('useTaskFilters', () => {
     {
       id: '2',
       title: 'Grocery run',
-      description: 'Buy vegetables',
       categoryId: 'personal',
       dueDate: '2026-07-22',
       createdAt: '2026-07-21T10:00:00.000Z',
