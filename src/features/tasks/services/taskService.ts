@@ -99,4 +99,15 @@ export const taskService = {
 
     return mapTaskRowToTask(data as TaskRow);
   },
+
+  async remove(taskId: string): Promise<void> {
+    const {error} = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', taskId);
+
+    if (error) {
+      throw error;
+    }
+  },
 };
