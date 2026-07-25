@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {StyleSheet, Switch, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import ScreenContainer from '../../../components/common/ScreenContainer';
 import ScreenHeader from '../../../shared/components/ScreenHeader';
+import {taskService} from '../services/taskService';
 import {Task} from '../types/task';
 
 type TaskDetailScreenProps = {
@@ -10,12 +11,36 @@ type TaskDetailScreenProps = {
 };
 
 const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
+  const [title, setTitle] = useState(task.title);
   const [completed, setCompleted] = useState(task.completed);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || isSaving) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setSaveError(null);
+      await taskService.update(task.id, {
+        title: trimmedTitle,
+        completed,
+      });
+      onBack?.();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Unable to update task');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <ScreenContainer style={styles.screen}>
       <TouchableOpacity onPress={onBack} style={styles.backButton}>
-        <Text style={styles.backText}>← Back</Text>
+        <Text style={styles.backText}>Back</Text>
       </TouchableOpacity>
 
       <ScreenHeader title={task.title} subtitle="Task details" />
@@ -27,16 +52,21 @@ const TaskDetailScreen = ({task, onBack}: TaskDetailScreenProps) => {
         </View>
 
         <Text style={styles.label}>Title</Text>
-        <TextInput style={styles.input} value={task.title} />
+        <TextInput style={styles.input} value={title} onChangeText={setTitle} />
 
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Completed</Text>
           <Switch value={completed} onValueChange={setCompleted} />
         </View>
 
+        {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
+
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.primaryButton}>
-            <Text style={styles.primaryText}>Save</Text>
+          <TouchableOpacity
+            style={[styles.primaryButton, isSaving ? styles.disabledButton : null]}
+            onPress={handleSave}
+            disabled={isSaving}>
+            <Text style={styles.primaryText}>{isSaving ? 'Saving...' : 'Save'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton}>
             <Text style={styles.secondaryText}>Delete</Text>
@@ -133,6 +163,13 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: '#b91c1c',
     fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  errorText: {
+    color: '#dc2626',
+    fontSize: 13,
   },
 });
 

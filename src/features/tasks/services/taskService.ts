@@ -19,6 +19,11 @@ type CreateTaskInput = {
   starred?: boolean;
 };
 
+type UpdateTaskInput = {
+  title: string;
+  completed: boolean;
+};
+
 const mapTaskRowToTask = (row: TaskRow): Task => {
   return {
     id: String(row.id),
@@ -72,5 +77,26 @@ export const taskService = {
       ...mapped,
       starred: task.starred ?? false,
     };
+  },
+
+  async update(taskId: string, updates: UpdateTaskInput): Promise<Task> {
+    const now = new Date().toISOString();
+
+    const {data, error} = await supabase
+      .from('tasks')
+      .update({
+        title: updates.title,
+        status: updates.completed ? 'done' : 'open',
+        updated_at: now,
+      })
+      .eq('id', taskId)
+      .select('id, title, created_at, category_id, status, due_date, updated_at')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return mapTaskRowToTask(data as TaskRow);
   },
 };
